@@ -35,6 +35,7 @@ export class FetchDomain {
   private client: CDPClient;
   private pausedRequests = new Map<string, PausedRequest>();
   private enabled = false;
+  private eventBound = false;
 
   constructor(client: CDPClient) {
     this.client = client;
@@ -59,11 +60,13 @@ export class FetchDomain {
     await this.client.send("Fetch.enable", params);
     this.enabled = true;
 
-    // Listen for paused requests
-    this.client.on("Fetch.requestPaused", (params) => {
-      const req = params as unknown as PausedRequest;
-      this.pausedRequests.set(req.requestId, req);
-    });
+    if (!this.eventBound) {
+      this.client.on("Fetch.requestPaused", (params) => {
+        const req = params as unknown as PausedRequest;
+        this.pausedRequests.set(req.requestId, req);
+      });
+      this.eventBound = true;
+    }
 
     return `Fetch interception enabled${patterns ? ` with ${patterns.length} pattern(s)` : " for all requests"}`;
   }
@@ -91,7 +94,9 @@ export class FetchDomain {
     const params: Record<string, unknown> = { requestId };
     if (overrides?.url) params.url = overrides.url;
     if (overrides?.method) params.method = overrides.method;
-    if (overrides?.postData) params.postData = btoa(overrides.postData);
+    if (overrides?.postData) {
+      params.postData = Buffer.from(overrides.postData, "utf-8").toString("base64");
+    }
     if (overrides?.headers) params.headers = overrides.headers;
 
     await this.client.send("Fetch.continueRequest", params);
@@ -108,7 +113,7 @@ export class FetchDomain {
     const params: Record<string, unknown> = {
       requestId,
       responseCode,
-      body: btoa(body),
+      body: Buffer.from(body, "utf-8").toString("base64"),
     };
     if (headers) params.responseHeaders = headers;
 
@@ -135,9 +140,11 @@ export class FetchDomain {
     const result = await this.client.send("Fetch.getResponseBody", {
       requestId,
     });
+    const raw = result.body as string;
+    const isBase64 = result.base64Encoded as boolean;
     return {
-      body: result.base64Encoded ? atob(result.body as string) : (result.body as string),
-      base64Encoded: result.base64Encoded as boolean,
+      body: isBase64 ? Buffer.from(raw, "base64").toString("utf-8") : raw,
+      base64Encoded: isBase64,
     };
   }
 

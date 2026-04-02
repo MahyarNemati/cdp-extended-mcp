@@ -32,16 +32,27 @@ export class CDPClient {
   private connected = false;
 
   async connect(wsUrl: string): Promise<void> {
+    if (this.connected) {
+      await this.disconnect();
+    }
+
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(wsUrl);
 
+      const connectTimeout = setTimeout(() => {
+        ws.close();
+        reject(new Error("WebSocket connection timed out after 10s"));
+      }, 10000);
+
       ws.on("open", () => {
+        clearTimeout(connectTimeout);
         this.ws = ws;
         this.connected = true;
         resolve();
       });
 
       ws.on("error", (err: Error) => {
+        clearTimeout(connectTimeout);
         reject(
           new Error(
             `WebSocket connection failed: ${err.message || "unknown error"}`
@@ -50,17 +61,21 @@ export class CDPClient {
       });
 
       ws.on("message", (data: WebSocket.RawData) => {
-        const msg = JSON.parse(data.toString());
-        this.handleMessage(msg);
+        try {
+          const msg = JSON.parse(data.toString());
+          this.handleMessage(msg);
+        } catch {
+          console.error("Failed to parse CDP message");
+        }
       });
 
       ws.on("close", () => {
         this.connected = false;
         this.ws = null;
-        for (const [id, handler] of this.pending) {
+        for (const [, handler] of this.pending) {
           handler.reject(new Error("WebSocket closed"));
-          this.pending.delete(id);
         }
+        this.pending.clear();
       });
     });
   }
@@ -84,7 +99,11 @@ export class CDPClient {
       const handlers = this.eventHandlers.get(msg.method);
       if (handlers) {
         for (const handler of handlers) {
-          handler(msg.params || {});
+          try {
+            handler(msg.params || {});
+          } catch {
+            // Don't let event handler errors crash the client
+          }
         }
       }
     }
@@ -146,18 +165,22 @@ export class CDPClient {
       this.ws.close();
       this.ws = null;
       this.connected = false;
+      this.pending.clear();
+      this.eventHandlers.clear();
     }
   }
 
   async getTargets(host: string, port: number): Promise<any[]> {
     const url = `http://${host}:${port}/json`;
     const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching targets`);
     return resp.json() as Promise<any[]>;
   }
 
   async getVersion(host: string, port: number): Promise<any> {
     const url = `http://${host}:${port}/json/version`;
     const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching version`);
     return resp.json();
   }
 }

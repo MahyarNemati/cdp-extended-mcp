@@ -86,9 +86,10 @@ server.tool(
       performanceDomain = new PerformanceDomain(client);
       cssDomain = new CSSDomain(client);
       return { content: [{ type: "text", text: `Connected to Chrome at ${wsUrl}` }] };
-    } catch (e: any) {
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       return {
-        content: [{ type: "text", text: `Connection failed: ${e.message}` }],
+        content: [{ type: "text", text: `Connection failed: ${msg}` }],
         isError: true,
       };
     }
@@ -125,12 +126,13 @@ server.tool(
       }
 
       return { content: [{ type: "text", text: lines.join("\n") }] };
-    } catch (e: any) {
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       return {
         content: [
           {
             type: "text",
-            text: `Failed to discover targets at ${host}:${port}: ${e.message}`,
+            text: `Failed to discover targets at ${host}:${port}: ${msg}`,
           },
         ],
         isError: true,
@@ -218,7 +220,12 @@ server.tool(
   },
   async ({ requestId, url, method, postData, headers }) => {
     const d = getDomains();
-    const overrides: any = {};
+    const overrides: {
+      url?: string;
+      method?: string;
+      postData?: string;
+      headers?: Array<{ name: string; value: string }>;
+    } = {};
     if (url) overrides.url = url;
     if (method) overrides.method = method;
     if (postData) overrides.postData = postData;
@@ -805,9 +812,11 @@ server.tool(
 
     const lines = [`## Matched CSS Rules for \`${selector}\`\n`];
 
-    if (result.inlineStyle?.cssProperties?.length > 0) {
+    const inlineProps = (result.inlineStyle as Record<string, unknown> | null)
+      ?.cssProperties as Array<{ text?: string }> | undefined;
+    if (inlineProps && inlineProps.length > 0) {
       lines.push("### Inline Styles");
-      for (const prop of result.inlineStyle.cssProperties) {
+      for (const prop of inlineProps) {
         if (prop.text) lines.push(`- ${prop.text}`);
       }
       lines.push("");
@@ -819,7 +828,7 @@ server.tool(
         const rule = match.rule;
         const selectorText =
           rule?.selectorList?.selectors
-            ?.map((s: any) => s.text)
+            ?.map((s: { text: string }) => s.text)
             .join(", ") || "unknown";
         lines.push(`**${selectorText}**`);
         if (rule?.style?.cssProperties) {
@@ -977,6 +986,19 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("CDP Extended MCP server running on stdio");
+
+  // Graceful shutdown
+  const cleanup = async () => {
+    try {
+      await client.disconnect();
+    } catch {
+      // Ignore cleanup errors
+    }
+    process.exit(0);
+  };
+
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
 }
 
 main().catch((err) => {

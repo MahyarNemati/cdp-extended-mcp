@@ -59,7 +59,7 @@ export class PerformanceDomain {
   async getMetrics(): Promise<PerformanceMetric[]> {
     if (!this.enabled) await this.enable();
     const result = await this.client.send("Performance.getMetrics");
-    return result.metrics as PerformanceMetric[];
+    return (result.metrics as PerformanceMetric[]) || [];
   }
 
   async getFormattedMetrics(): Promise<string> {
@@ -86,7 +86,7 @@ export class PerformanceDomain {
     for (const name of important) {
       const metric = metrics.find((m) => m.name === name);
       if (metric) {
-        let value = metric.value;
+        const value = metric.value;
         let formatted: string;
 
         if (name.includes("Duration")) {
@@ -106,7 +106,6 @@ export class PerformanceDomain {
     return lines.join("\n");
   }
 
-  // CPU Profiling via Profiler domain
   async startCPUProfile(): Promise<string> {
     await this.client.send("Profiler.enable");
     await this.client.send("Profiler.start");
@@ -125,15 +124,14 @@ export class PerformanceDomain {
 
     const profile = result.profile as CPUProfile;
 
-    // Analyze the profile
     const hotFunctions = profile.nodes
       .filter((n) => n.hitCount > 0)
       .sort((a, b) => b.hitCount - a.hitCount)
       .slice(0, 20);
 
-    const totalSamples = profile.samples.length;
+    const totalSamples = profile.samples?.length || 1;
     const duration =
-      (profile.endTime - profile.startTime) / 1000000; // microseconds to seconds
+      (profile.endTime - profile.startTime) / 1000000;
 
     const lines = [
       `## CPU Profile Summary`,
@@ -159,7 +157,6 @@ export class PerformanceDomain {
     return { summary: lines.join("\n"), profile };
   }
 
-  // Heap Profiling via HeapProfiler domain
   async takeHeapSnapshot(): Promise<string> {
     await this.client.send("HeapProfiler.enable");
 
@@ -170,94 +167,96 @@ export class PerformanceDomain {
 
     this.client.on("HeapProfiler.addHeapSnapshotChunk", chunkHandler);
 
-    await this.client.send("HeapProfiler.takeHeapSnapshot", {
-      reportProgress: false,
-      treatGlobalObjectsAsRoots: true,
-    });
+    try {
+      await this.client.send("HeapProfiler.takeHeapSnapshot", {
+        reportProgress: false,
+        treatGlobalObjectsAsRoots: true,
+      });
+    } finally {
+      this.client.off("HeapProfiler.addHeapSnapshotChunk", chunkHandler);
+      await this.client.send("HeapProfiler.disable");
+    }
 
-    this.client.off("HeapProfiler.addHeapSnapshotChunk", chunkHandler);
-    await this.client.send("HeapProfiler.disable");
+    const snapshotStr = chunks.join("");
+    let nodeCount: string | number = "unknown";
+    let edgeCount: string | number = "unknown";
 
-    const snapshot = chunks.join("");
-    const parsed = JSON.parse(snapshot);
-
-    // Extract summary stats
-    const nodeCount = parsed.snapshot?.node_count ?? "unknown";
-    const edgeCount = parsed.snapshot?.edge_count ?? "unknown";
+    try {
+      const parsed = JSON.parse(snapshotStr);
+      nodeCount = parsed.snapshot?.node_count ?? "unknown";
+      edgeCount = parsed.snapshot?.edge_count ?? "unknown";
+    } catch {
+      // Snapshot too large or malformed - report size only
+    }
 
     return [
       "## Heap Snapshot Summary",
       `- **Nodes**: ${nodeCount}`,
       `- **Edges**: ${edgeCount}`,
-      `- **Snapshot size**: ${(snapshot.length / 1024 / 1024).toFixed(2)}MB`,
-      "",
-      "Full snapshot captured. Use getHeapStats for detailed breakdowns.",
+      `- **Snapshot size**: ${(snapshotStr.length / 1024 / 1024).toFixed(2)}MB`,
     ].join("\n");
   }
 
-  // Core Web Vitals via JS evaluation
   async getCoreWebVitals(): Promise<string> {
     const script = `
       new Promise((resolve) => {
         const vitals = {};
+        try {
+          const lcpObserver = new PerformanceObserver((list) => {
+            const entries = list.getEntries();
+            if (entries.length > 0) vitals.lcp = entries[entries.length - 1].startTime;
+          });
+          lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
 
-        // LCP
-        const lcpObserver = new PerformanceObserver((list) => {
-          const entries = list.getEntries();
-          vitals.lcp = entries[entries.length - 1].startTime;
-        });
-        try { lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true }); } catch(e) {}
+          let clsValue = 0;
+          const clsObserver = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+              if (!entry.hadRecentInput) clsValue += entry.value;
+            }
+            vitals.cls = clsValue;
+          });
+          clsObserver.observe({ type: 'layout-shift', buffered: true });
 
-        // CLS
-        let clsValue = 0;
-        const clsObserver = new PerformanceObserver((list) => {
-          for (const entry of list.getEntries()) {
-            if (!entry.hadRecentInput) clsValue += entry.value;
+          const paintEntries = performance.getEntriesByType('paint');
+          const fcp = paintEntries.find(e => e.name === 'first-contentful-paint');
+          if (fcp) vitals.fcp = fcp.startTime;
+
+          const navEntries = performance.getEntriesByType('navigation');
+          if (navEntries.length > 0) {
+            vitals.ttfb = navEntries[0].responseStart;
+            vitals.domContentLoaded = navEntries[0].domContentLoadedEventEnd;
+            vitals.loadComplete = navEntries[0].loadEventEnd;
           }
-          vitals.cls = clsValue;
-        });
-        try { clsObserver.observe({ type: 'layout-shift', buffered: true }); } catch(e) {}
 
-        // FCP
-        const paintEntries = performance.getEntriesByType('paint');
-        const fcp = paintEntries.find(e => e.name === 'first-contentful-paint');
-        if (fcp) vitals.fcp = fcp.startTime;
+          if (performance.memory) {
+            vitals.jsHeapUsed = performance.memory.usedJSHeapSize;
+            vitals.jsHeapTotal = performance.memory.totalJSHeapSize;
+          }
 
-        // TTFB
-        const navEntries = performance.getEntriesByType('navigation');
-        if (navEntries.length > 0) {
-          vitals.ttfb = navEntries[0].responseStart;
-          vitals.domContentLoaded = navEntries[0].domContentLoadedEventEnd;
-          vitals.loadComplete = navEntries[0].loadEventEnd;
-        }
-
-        // Long tasks
-        vitals.longTasks = performance.getEntriesByType('longtask')?.length || 0;
-
-        // Memory
-        if (performance.memory) {
-          vitals.jsHeapUsed = performance.memory.usedJSHeapSize;
-          vitals.jsHeapTotal = performance.memory.totalJSHeapSize;
-        }
-
-        setTimeout(() => {
-          lcpObserver.disconnect();
-          clsObserver.disconnect();
+          setTimeout(() => {
+            lcpObserver.disconnect();
+            clsObserver.disconnect();
+            resolve(JSON.stringify(vitals));
+          }, 200);
+        } catch(e) {
           resolve(JSON.stringify(vitals));
-        }, 100);
+        }
       })
     `;
 
-    // We need Runtime domain to evaluate
     const result = await this.client.send("Runtime.evaluate", {
       expression: script,
       awaitPromise: true,
       returnByValue: true,
     });
 
-    const vitals = JSON.parse(
-      (result.result as any)?.value || "{}"
-    );
+    const resultObj = result.result as Record<string, unknown> | undefined;
+    let vitals: Record<string, number> = {};
+    try {
+      vitals = JSON.parse((resultObj?.value as string) || "{}");
+    } catch {
+      return "Failed to collect Core Web Vitals. Page may not support the Performance Observer API.";
+    }
 
     const lines = ["## Core Web Vitals\n"];
 
@@ -283,12 +282,14 @@ export class PerformanceDomain {
       );
     if (vitals.loadComplete !== undefined)
       lines.push(`- **Page Load Complete**: ${vitals.loadComplete.toFixed(0)}ms`);
-    if (vitals.longTasks !== undefined)
-      lines.push(`- **Long Tasks**: ${vitals.longTasks}`);
     if (vitals.jsHeapUsed !== undefined)
       lines.push(
-        `- **JS Heap**: ${(vitals.jsHeapUsed / 1024 / 1024).toFixed(2)}MB / ${(vitals.jsHeapTotal / 1024 / 1024).toFixed(2)}MB`
+        `- **JS Heap**: ${(vitals.jsHeapUsed / 1024 / 1024).toFixed(2)}MB / ${((vitals.jsHeapTotal || 0) / 1024 / 1024).toFixed(2)}MB`
       );
+
+    if (lines.length === 1) {
+      lines.push("No Web Vitals data available. Try navigating to a page first.");
+    }
 
     return lines.join("\n");
   }

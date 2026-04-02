@@ -13,12 +13,12 @@ export interface AXNode {
   nodeId: string;
   ignored: boolean;
   role?: { type: string; value: string };
-  name?: { type: string; value: string; sources?: any[] };
+  name?: { type: string; value: string; sources?: unknown[] };
   description?: { type: string; value: string };
-  value?: { type: string; value: any };
+  value?: { type: string; value: unknown };
   properties?: Array<{
     name: string;
-    value: { type: string; value: any };
+    value: { type: string; value: unknown };
   }>;
   childIds?: string[];
   backendDOMNodeId?: number;
@@ -31,7 +31,6 @@ export interface A11yIssue {
   nodeId?: string;
   role?: string;
   name?: string;
-  selector?: string;
 }
 
 export class AccessibilityDomain {
@@ -65,7 +64,7 @@ export class AccessibilityDomain {
       "Accessibility.getFullAXTree",
       params
     );
-    return result.nodes as AXNode[];
+    return (result.nodes as AXNode[]) || [];
   }
 
   async getRootNode(frameId?: string): Promise<AXNode> {
@@ -99,7 +98,7 @@ export class AccessibilityDomain {
       "Accessibility.queryAXTree",
       params
     );
-    return result.nodes as AXNode[];
+    return (result.nodes as AXNode[]) || [];
   }
 
   async getNodeAndAncestors(
@@ -116,7 +115,7 @@ export class AccessibilityDomain {
       "Accessibility.getAXNodeAndAncestors",
       params
     );
-    return result.nodes as AXNode[];
+    return (result.nodes as AXNode[]) || [];
   }
 
   async getChildNodes(
@@ -132,7 +131,7 @@ export class AccessibilityDomain {
       "Accessibility.getChildAXNodes",
       params
     );
-    return result.nodes as AXNode[];
+    return (result.nodes as AXNode[]) || [];
   }
 
   async audit(): Promise<A11yIssue[]> {
@@ -147,22 +146,21 @@ export class AccessibilityDomain {
       const role = node.role?.value;
       const name = node.name?.value;
 
-      // Check for images without alt text
-      if (role === "img" && (!name || name.trim() === "")) {
+      // Images without alt text
+      if (role === "img" && (!name || String(name).trim() === "")) {
         issues.push({
           type: "missing-alt-text",
           severity: "error",
           message: "Image element is missing alternative text",
           nodeId: node.nodeId,
           role,
-          backendNodeId: node.backendDOMNodeId,
-        } as any);
+        });
       }
 
-      // Check for buttons/links without accessible names
+      // Buttons/links without accessible names
       if (
         (role === "button" || role === "link") &&
-        (!name || name.trim() === "")
+        (!name || String(name).trim() === "")
       ) {
         issues.push({
           type: "missing-accessible-name",
@@ -173,7 +171,7 @@ export class AccessibilityDomain {
         });
       }
 
-      // Check for form inputs without labels
+      // Form inputs without labels
       if (
         (role === "textbox" ||
           role === "combobox" ||
@@ -181,7 +179,7 @@ export class AccessibilityDomain {
           role === "spinbutton" ||
           role === "checkbox" ||
           role === "radio") &&
-        (!name || name.trim() === "")
+        (!name || String(name).trim() === "")
       ) {
         issues.push({
           type: "missing-label",
@@ -192,11 +190,11 @@ export class AccessibilityDomain {
         });
       }
 
-      // Check for headings without text
+      // Headings without text
       if (
         role &&
         role.startsWith("heading") &&
-        (!name || name.trim() === "")
+        (!name || String(name).trim() === "")
       ) {
         issues.push({
           type: "empty-heading",
@@ -207,7 +205,7 @@ export class AccessibilityDomain {
         });
       }
 
-      // Check for generic elements that might need roles
+      // Clickable elements without semantic roles
       if (role === "generic" && node.properties) {
         const hasClickHandler = node.properties.some(
           (p) => p.name === "clickable" && p.value.value === true
@@ -242,11 +240,11 @@ export class AccessibilityDomain {
       const indent = "  ".repeat(depth);
       const role = node.role?.value || "unknown";
       const name = node.name?.value || "";
-      const value = node.value?.value || "";
+      const value = node.value?.value;
 
       let line = `${indent}[${role}]`;
       if (name) line += ` "${name}"`;
-      if (value) line += ` = ${value}`;
+      if (value !== undefined && value !== "") line += ` = ${value}`;
 
       if (node.properties && node.properties.length > 0) {
         const props = node.properties
@@ -268,7 +266,6 @@ export class AccessibilityDomain {
       }
     };
 
-    // Find root (first node usually)
     if (nodes.length > 0) {
       printNode(nodes[0]!, 0);
     }
