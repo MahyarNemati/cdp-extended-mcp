@@ -117,11 +117,13 @@ export class EmulationDomain {
 
     if (preset.userAgent) {
       await this.setUserAgent(preset.userAgent);
+    } else {
+      // Desktop: clear any previous UA override
+      await this.client.send("Emulation.setUserAgentOverride", { userAgent: "" });
     }
 
-    if (preset.mobile) {
-      await this.setTouchEmulation(true);
-    }
+    // Always set touch to match device type
+    await this.setTouchEmulation(preset.mobile);
 
     return `Emulating ${preset.name} (${preset.width}x${preset.height} @${preset.deviceScaleFactor}x)`;
   }

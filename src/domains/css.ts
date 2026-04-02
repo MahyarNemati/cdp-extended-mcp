@@ -33,6 +33,7 @@ interface MatchedRule {
 export class CSSDomain {
   private client: CDPClient;
   private enabled = false;
+  private coverageTracking = false;
 
   constructor(client: CDPClient) {
     this.client = client;
@@ -194,6 +195,7 @@ export class CSSDomain {
   async startCoverageTracking(): Promise<string> {
     if (!this.enabled) await this.enable();
     await this.client.send("CSS.startRuleUsageTracking");
+    this.coverageTracking = true;
     return "CSS coverage tracking started. Browse the site, then call css_coverage_stop.";
   }
 
@@ -201,6 +203,10 @@ export class CSSDomain {
     summary: string;
     coverage: Array<{ styleSheetId: string; startOffset: number; endOffset: number; used: boolean }>;
   }> {
+    if (!this.coverageTracking) {
+      throw new Error("Coverage tracking not started. Call css_coverage_start first.");
+    }
+    this.coverageTracking = false;
     const result = await this.client.send("CSS.stopRuleUsageTracking");
     const rules = (result.ruleUsage as Array<{
       styleSheetId: string;

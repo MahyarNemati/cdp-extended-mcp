@@ -182,14 +182,10 @@ server.tool(
       )
       .optional()
       .describe("URL patterns to intercept (omit for all requests)"),
-    handleAuthRequests: z
-      .boolean()
-      .optional()
-      .describe("Handle HTTP auth challenges"),
   },
-  async ({ patterns, handleAuthRequests }) => {
+  async ({ patterns }) => {
     const d = getDomains();
-    const result = await d.fetch.enable(patterns, handleAuthRequests);
+    const result = await d.fetch.enable(patterns);
     return { content: [{ type: "text", text: result }] };
   }
 );
@@ -302,7 +298,11 @@ server.tool(
   async ({ requestId }) => {
     const d = getDomains();
     const result = await d.fetch.getResponseBody(requestId);
-    return { content: [{ type: "text", text: result.body }] };
+    const MAX_BODY = 50000;
+    const body = result.body.length > MAX_BODY
+      ? result.body.slice(0, MAX_BODY) + `\n\n... truncated (${result.body.length} bytes total)`
+      : result.body;
+    return { content: [{ type: "text", text: body }] };
   }
 );
 
@@ -367,9 +367,9 @@ server.tool(
   "emulate_custom_device",
   "Set custom device metrics (viewport size, scale, mobile mode)",
   {
-    width: z.number().describe("Viewport width in pixels"),
-    height: z.number().describe("Viewport height in pixels"),
-    deviceScaleFactor: z.number().default(1).describe("Device pixel ratio"),
+    width: z.number().int().min(1).max(10000).describe("Viewport width in pixels"),
+    height: z.number().int().min(1).max(10000).describe("Viewport height in pixels"),
+    deviceScaleFactor: z.number().min(0.1).max(10).default(1).describe("Device pixel ratio"),
     mobile: z.boolean().default(false).describe("Emulate mobile device"),
   },
   async ({ width, height, deviceScaleFactor, mobile }) => {
@@ -388,9 +388,9 @@ server.tool(
   "emulate_geolocation",
   "Fake the browser's geolocation to any coordinates",
   {
-    latitude: z.number().describe("Latitude (-90 to 90)"),
-    longitude: z.number().describe("Longitude (-180 to 180)"),
-    accuracy: z.number().optional().describe("Accuracy in meters"),
+    latitude: z.number().min(-90).max(90).describe("Latitude (-90 to 90)"),
+    longitude: z.number().min(-180).max(180).describe("Longitude (-180 to 180)"),
+    accuracy: z.number().min(0).optional().describe("Accuracy in meters"),
   },
   async ({ latitude, longitude, accuracy }) => {
     const d = getDomains();
@@ -516,6 +516,8 @@ server.tool(
   {
     rate: z
       .number()
+      .min(1)
+      .max(20)
       .describe(
         "Throttling rate (1 = no throttle, 4 = 4x slower, 6 = 6x slower for low-end mobile)"
       ),
@@ -555,6 +557,12 @@ server.tool(
     await d.emulation.setVisionDeficiency("none");
     await d.emulation.setCPUThrottling(1);
     await d.emulation.setTouchEmulation(false);
+    // Clear UA, timezone, locale, and media overrides
+    await d.emulation.setUserAgent("");
+    try { await d.emulation.setTimezone(""); } catch { /* reset */ }
+    try { await d.emulation.setLocale(""); } catch { /* reset */ }
+    await d.emulation.setEmulatedMedia(undefined, []);
+    await d.emulation.enableScriptExecution();
     return {
       content: [
         { type: "text", text: "All emulation overrides cleared" },
@@ -650,7 +658,7 @@ server.tool(
   async ({ depth, maxDisplay }) => {
     const d = getDomains();
     const nodes = await d.accessibility.getFullTree(depth);
-    const formatted = d.accessibility.formatTree(nodes, maxDisplay);
+    const formatted = d.accessibility.formatTree(nodes, 10, maxDisplay);
     return {
       content: [
         {

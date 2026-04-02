@@ -226,16 +226,26 @@ export class AccessibilityDomain {
     return issues;
   }
 
-  formatTree(nodes: AXNode[], maxDepth = 5): string {
+  formatTree(nodes: AXNode[], maxDepth = 10, maxNodes = 100): string {
     const nodeMap = new Map<string, AXNode>();
     for (const node of nodes) {
       nodeMap.set(node.nodeId, node);
     }
 
     const lines: string[] = [];
+    let nodeCount = 0;
+    let truncated = false;
 
     const printNode = (node: AXNode, depth: number) => {
-      if (depth > maxDepth || node.ignored) return;
+      if (depth > maxDepth || node.ignored || truncated) return;
+      if (nodeCount >= maxNodes) {
+        if (!truncated) {
+          lines.push(`\n... truncated at ${maxNodes} nodes (${nodes.length} total)`);
+          truncated = true;
+        }
+        return;
+      }
+      nodeCount++;
 
       const indent = "  ".repeat(depth);
       const role = node.role?.value || "unknown";
@@ -244,11 +254,11 @@ export class AccessibilityDomain {
 
       let line = `${indent}[${role}]`;
       if (name) line += ` "${name}"`;
-      if (value !== undefined && value !== "") line += ` = ${value}`;
+      if (value !== undefined && value !== null && value !== "") line += ` = ${value}`;
 
       if (node.properties && node.properties.length > 0) {
         const props = node.properties
-          .filter((p) => p.value.value !== false && p.value.value !== "")
+          .filter((p) => p.value.value != null && p.value.value !== "")
           .map((p) => `${p.name}: ${p.value.value}`)
           .join(", ");
         if (props) line += ` (${props})`;
@@ -258,6 +268,7 @@ export class AccessibilityDomain {
 
       if (node.childIds) {
         for (const childId of node.childIds) {
+          if (truncated) break;
           const child = nodeMap.get(childId);
           if (child) {
             printNode(child, depth + 1);

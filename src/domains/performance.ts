@@ -250,6 +250,12 @@ export class PerformanceDomain {
       returnByValue: true,
     });
 
+    // Check for script execution errors
+    if (result.exceptionDetails) {
+      const exMsg = (result.exceptionDetails as Record<string, unknown>)?.text || "unknown error";
+      return `Failed to collect Core Web Vitals: ${exMsg}`;
+    }
+
     const resultObj = result.result as Record<string, unknown> | undefined;
     let vitals: Record<string, number> = {};
     try {
