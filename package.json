@@ -1,0 +1,55 @@
+{
+  "name": "cdp-extended-mcp",
+  "version": "1.0.0",
+  "description": "Extended Chrome DevTools Protocol MCP Server - Fetch interception, Emulation, Accessibility, Performance, and CSS domains",
+  "type": "module",
+  "bin": {
+    "cdp-extended-mcp": "./dist/index.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "chrome-devtools-protocol",
+    "cdp",
+    "accessibility",
+    "performance",
+    "css",
+    "fetch-interception",
+    "emulation",
+    "browser-automation"
+  ],
+  "author": "MYX (Mahyar Nemati) <https://github.com/MahyarNemati>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MahyarNemati/cdp-extended-mcp.git"
+  },
+  "homepage": "https://github.com/MahyarNemati/cdp-extended-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/MahyarNemati/cdp-extended-mcp/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ws": "^8.20.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^6.0.2"
+  }
+}
